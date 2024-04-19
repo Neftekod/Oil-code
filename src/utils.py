@@ -1,12 +1,3 @@
-# import pandas as pd
-# from rdkit import Chem
-# from mol2vec.features import MolSentence, DfVec, sentences2vec, mol2alt_sentence, mol2sentence
-# from gensim.models import word2vec
-# import numpy as np
-# import matplotlib.pyplot as plt
-# from sklearn.linear_model import RidgeCV, LassoCV, RandomForestRegressor
-# from sklearn.model_selection import train_test_split
-# from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 class SMILES2Wec:
     def __init__(self, directory):
@@ -15,8 +6,8 @@ class SMILES2Wec:
     def load_data(self, filename):
         return pd.read_csv(self.directory + filename)
     
-    def preprocess_data(self, df):
-        df = df[(df['oil_property_param_title'] == 'ad7e6027-00b8-4c27-918c-d1561f949ad8')]
+    def preprocess_data(self, df, property_ = 'ad7e6027-00b8-4c27-918c-d1561f949ad8'):
+        df = df[(df['oil_property_param_title'] == property_)]
         df = df[df['smiles'].notna()]
         df = df.groupby(['blend_id', 'oil_property_param_title', 'smiles']).agg({'oil_property_param_value': 'mean'}).reset_index()
         df['mol'] = df['smiles'].apply(lambda x: Chem.MolFromSmiles(x))
@@ -24,17 +15,63 @@ class SMILES2Wec:
         df = df.drop(df[df['blend_id'].isin(df.loc[rows_to_drop, 'blend_id'])].index)
         return df
     
-    def concatenate_sentences(self, vec_list):
-        vec_arrays = [x.sentence for x in vec_list]
-        concatenated_vec = np.concatenate(vec_arrays)
-        return concatenated_vec
+    def concatenate_sentences(self, column_list):
+        concatenated_vecs = []
+        for vec_list in column_list:
+            vec_arrays = [x for x in vec_list]
+            concatenated_vec = np.concatenate(vec_arrays)
+            concatenated_vecs.append(concatenated_vec)
+        return concatenated_vecs
     
     def preprocess_mol2vec(self, df):
         model = word2vec.Word2Vec.load(self.directory + 'model_300dim.pkl')
-        df['sentence'] = df.apply(lambda x: MolSentence(mol2alt_sentence(x['mol'], 1)), axis=1)
-        grouped_df = df.groupby('blend_id')['sentence'].apply(self.concatenate_sentences).reset_index()
-        grouped_df['mol2vec'] = [DfVec(x) for x in sentences2vec(grouped_df['sentence'], model, unseen='UNK')]
+        df['sentence'] = df.apply(lambda x: mol2sentence(x['mol'], 1), axis=1)
+        df['mol2vec'] = [DfVec(x) for x in sentences2vec(df['sentence'], model, unseen='UNK')]
+        grouped_df = df.groupby('blend_id')[['sentence', 'mol2vec']].apply(lambda x: self.concatenate_sentences(x.values)).reset_index()
         return grouped_df
+    
+    def mol_to_dgl_graph(self, mol):
+        graph = dgl.DGLGraph()
+
+        num_atoms = mol.GetNumAtoms()
+        graph.add_nodes(num_atoms)
+
+        for bond in mol.GetBonds():
+            graph.add_edges(bond.GetBeginAtomIdx(), bond.GetEndAtomIdx())
+            graph.add_edges(bond.GetEndAtomIdx(), bond.GetBeginAtomIdx())
+
+        node_feats = torch.tensor([[atom.GetAtomicNum()] for atom in mol.GetAtoms()], dtype=torch.float32)
+        graph.ndata['feat'] = node_feats
+
+        edge_feats = []
+        for bond in mol.GetBonds():
+            bond_type = bond.GetBondTypeAsDouble()
+            edge_feats.append([bond_type])
+            edge_feats.append([bond_type])
+        graph.edata['type'] = torch.tensor(edge_feats, dtype=torch.float32)
+
+        return graph
+
+    def generate_graphs(self, df):
+        return df['mol'].apply(self.mol_to_dgl_graph)
+    
+    def embed_smiles(self, model, smiles):
+        tokenizer = AutoTokenizer.from_pretrained(model)
+        model = AutoModel.from_pretrained(model)
+        # 'DeepChem/ChemBERTa-10M-MLM'
+        # 'ibm/MoLFormer-XL-both-10pct'
+        model.eval()
+        encoded_inputs = tokenizer(list(smiles), padding=True, truncation=True, return_tensors="pt")
+        
+        with torch.no_grad():
+            outputs = model(**encoded_inputs)
+        embeddings = outputs.pooler_output
+        return pd.DataFrame(embeddings.numpy())
+    
+    def preprocess_embeddings(self, df, embedding_method):
+        smiles = df['smiles'].tolist()
+        embeddings_df = embedding_method(smiles) # ! 
+        return pd.concat([df, embeddings_df], axis=1)
     
     def smiles2sentences(self, df):
         # grouped_df = df.groupby(['blend_id', 'oil_property_param_title', 'smiles']).agg({'oil_property_param_value': 'mean'}).reset_index()
