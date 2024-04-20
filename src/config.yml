@@ -1,0 +1,12 @@
+# Configuration file for neural network model
+SmallNN:
+  n_splits: 3
+  neurons: 64
+  activation: relu
+  output_activation: linear
+  learning_rate: 0.001
+  lr_reduction_factor: 0.001
+  lr_patience: 10
+  epochs: 400
+  batch_size: 64
+  verbose: 1

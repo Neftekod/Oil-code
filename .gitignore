@@ -8,3 +8,5 @@ src/materials/train_data_fix_concat.csv
 src/materials/test_data_fix_concat.csv
 src/materials/train_data_fix_concat_fixed_trunc.csv
 src/materials/train_data.csv
+src/materials/embed_model
+src/best_model_weights.h5
