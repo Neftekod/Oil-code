@@ -8,6 +8,7 @@ import yaml
 from rdkit import Chem
 from rdkit.Chem import AllChem, DataStructs
 from mordred import Calculator, descriptors
+import pubchempy as pcp
 
 from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer, AutoModel, AutoModelForMaskedLM
@@ -343,7 +344,7 @@ class GetDescriptors:
 
     def calculate_descriptors(self):
         calc = Calculator(descriptors, ignore_3D=True)
-        df_desc = calc.pandas(self.smiles_df['mol'])
+        df_desc = calc.pandas(self.smiles_df["mol"])
         df_desc = df_desc.dropna()
         #         df_desc = df_desc.select_dtypes(include=np.number).astype('float32')
         #         df_desc = df_desc.loc[:, df_desc.var() > 0.0]
@@ -354,7 +355,7 @@ class GetDescriptors:
         from tqdm import tqdm
         data = []
         for i in tqdm(self.smiles_df['smiles'], desc="Download properties"):
-            props = pcp.get_properties(property_list, i, 'smiles')
+            props = pcp.get_properties(property_list, i, "smiles")
             data.append(props)
 
         rows = []
