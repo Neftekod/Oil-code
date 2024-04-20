@@ -33,6 +33,7 @@ from tensorflow.keras.wrappers.scikit_learn import KerasRegressor
 from tensorflow.keras.callbacks import ReduceLROnPlateau
 from tensorflow.keras.callbacks import ModelCheckpoint
 import torch
+from tensorflow import keras
 
 from catboost import CatBoostRegressor
 import xgboost as xgb
@@ -511,7 +512,6 @@ class SmallNN:
         model, score = self.neural_model()
         self.evaluation(model)
 
-
 class LstmRegressor:
     def __init__(
         self,
@@ -533,7 +533,7 @@ class LstmRegressor:
         self.epochs = epochs
         self.batch_size = batch_size
         self.model = None
-        self.reduce_lr = ReduceLROnPlateau(monitor="val_mean_absolute_error")
+        self.reduce_lr = ReduceLROnPlateau(monitor="loss")
         self.scaler = scaler
         self.loss_ = loss
 
