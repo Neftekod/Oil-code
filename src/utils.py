@@ -6,6 +6,7 @@ import dgl
 import yaml
 
 from rdkit import Chem
+from rdkit.Chem import AllChem, DataStructs
 from mordred import Calculator, descriptors
 
 from huggingface_hub import snapshot_download
@@ -42,8 +43,10 @@ import matplotlib.pyplot as plt
 
 
 class PreprocessSMILES:
-    def __init__(self, directory):
+
+    def __init__(self, directory, base_on="smiles"):
         self.directory = directory
+        self.base_on_smiles = base_on
 
     def load_data(self, filename):
         return pd.read_csv(self.directory + filename)
@@ -71,9 +74,39 @@ class PreprocessSMILES:
         df = df[df['smiles'].notna()]
         df = df.groupby(['blend_id', 'oil_property_param_title', 'smiles']).agg({'oil_property_param_value': 'mean'}).reset_index()
         df["mol"] = df["smiles"].apply(Chem.MolFromSmiles)
+        df["canonical_smiles"] = df["smiles"].apply(
+            lambda x: (
+                Chem.MolToSmiles(
+                    Chem.MolFromSmiles(x), isomericSmiles=True, canonical=True
+                )
+                if x is not None
+                else None
+            )
+        )
         rows_to_drop = df[df['mol'].isnull()].index
         df = df.drop(df[df['blend_id'].isin(df.loc[rows_to_drop, 'blend_id'])].index)
         return df
+
+    def calculate_similarity(self, smiles_list):
+        """
+        Calculates molecular similarity scores for a list of SMILES strings.
+
+        Args:
+        - smiles_list (list): List of SMILES strings
+
+        Returns:
+        - similarity_vectors (list): List of similarity vectors for each compound pair
+        """
+        fps = [
+            AllChem.GetMorganFingerprintAsBitVect(Chem.MolFromSmiles(smiles), 2)
+            for smiles in smiles_list
+        ]
+        similarity_vectors = []
+        for i in range(len(smiles_list)):
+            for j in range(i + 1, len(smiles_list)):
+                similarity_score = DataStructs.TanimotoSimilarity(fps[i], fps[j])
+                similarity_vectors.append(similarity_score)
+        return similarity_vectors
 
     def concatenate_sentences(self, vec_list) -> List:
         """
@@ -190,7 +223,7 @@ class PreprocessSMILES:
         """
 
         def process_row(row):
-            smiles = row["smiles"]
+            smiles = row[self.base_on_smiles]
             encoded_inputs = tokenizer(
                 smiles, padding=True, truncation=True, return_tensors="pt"
             )
@@ -244,11 +277,21 @@ class PreprocessSMILES:
         pd.DataFrame
             Aggregated data with sentences formed by concatenating SMILES strings by blend_id and oil_property_param_title.
         """
-        return (
+        df = (
             df.groupby(["blend_id", "oil_property_param_title"])
-            .agg({"smiles": lambda x: ", ".join(x), "oil_property_param_value": "mean"})
+            .agg(
+                {
+                    "canonical_smiles": lambda x: ", ".join(x),
+                    "smiles": lambda x: ", ".join(x),
+                    "oil_property_param_value": "mean",
+                }
+            )
             .reset_index()
         )
+        df["similarity_vectors"] = df["smiles"].apply(
+            lambda x: self.calculate_similarity(x.split(", "))
+        )
+        return df
 
     def xy_split(
         self, df: pd.DataFrame, column: str = "mol2vec"
@@ -338,7 +381,7 @@ class SimpleRegressions:
             raise ValueError("Length of X and y must be the same")
 
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42
+            X, y, test_size=0.2, shuffle=True, random_state=42
         )
         self.s_caler = StandardScaler()
         self.y_train_scaled = self.s_caler.fit_transform(
@@ -427,7 +470,7 @@ class SmallNN:
             raise ValueError("X and y cannot be None")
 
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
-            X, y, test_size=0.1, random_state=42
+            X, y, test_size=0.1, shuffle=True, random_state=42
         )
         self.s_caler = MinMaxScaler()
         self.y_train_scaled = self.s_caler.fit_transform(
