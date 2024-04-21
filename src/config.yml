@@ -1,7 +1,7 @@
 # Configuration file for neural network model
 embeddings:
   SmallNN:
-    input: [328, 384]
+    input: [338, 384]
     n_splits: 5
     neurons: 64
     activation: relu

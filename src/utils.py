@@ -29,7 +29,7 @@ from gensim.models import word2vec
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.metrics import mean_squared_error, mean_absolute_error
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.svm import SVR
 from sklearn.linear_model import RidgeCV, LassoCV
 
@@ -409,7 +409,8 @@ class GetDescriptors:
 
 
 class SimpleRegressions:
-    def __init__(self, X, y):
+
+    def __init__(self, X, y, test_X=None):
         if X is None or y is None:
             raise ValueError("X and y cannot be None")
 
@@ -421,6 +422,12 @@ class SimpleRegressions:
 
         if len(X) != len(y):
             raise ValueError("Length of X and y must be the same")
+
+        self.test_X = test_X
+        self.catboost = None
+        self.lgbm = None
+        self.gb_regressor = None
+        self.ridge_regressor = None
 
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
             X, y, test_size=0.2, shuffle=True, random_state=42
@@ -455,32 +462,74 @@ class SimpleRegressions:
 
     def fit_and_evaluate(self):
         print("Catboost")
-        catboost = CatBoostRegressor(
+        self.catboost = CatBoostRegressor(
             iterations=2000, learning_rate=0.1, loss_function="RMSE", random_seed=1
         )
-        catboost.fit(
+        self.catboost.fit(
             self.X_train,
             self.y_train_scaled,
             eval_set=(self.X_test, self.y_test_scaled),
             verbose=1,
         )
-        self.evaluation(catboost)
+        self.evaluation(self.catboost)
 
         print("\nLGBMRegressor")
-        lgbm = lgb.LGBMRegressor(n_estimators=2000, learning_rate=0.1, random_state=3)
-        lgbm.fit(
+        self.lgbm = lgb.LGBMRegressor(
+            n_estimators=2000, learning_rate=0.1, random_state=3
+        )
+        self.lgbm.fit(
             self.X_train,
             self.y_train_scaled,
             eval_set=[(self.X_test, self.y_test_scaled)],
         )
-        self.evaluation(lgbm)
+        self.evaluation(self.lgbm)
 
         print("\nGradientBoostingRegressor")
-        gb_regressor = GradientBoostingRegressor(
+        self.gb_regressor = GradientBoostingRegressor(
             n_estimators=2000, learning_rate=0.1, random_state=45
         )
-        gb_regressor.fit(self.X_train, self.y_train_scaled)
-        self.evaluation(gb_regressor)
+        self.gb_regressor.fit(self.X_train, self.y_train_scaled)
+        self.evaluation(self.gb_regressor)
+
+        print("\nStack model")
+        self.ridge_train()
+
+    def ridge_train(self):
+        catboost_prediction_train = self.catboost.predict(self.X_train)
+        lgbm_prediction_train = self.lgbm.predict(self.X_train)
+        gb_prediction_train = self.gb_regressor.predict(self.X_train)
+        predictions_df_train = pd.DataFrame(
+            {
+                "CatBoost_Prediction": catboost_prediction_train,
+                "LGBM_Prediction": lgbm_prediction_train,
+                "GradientBoosting_Prediction": gb_prediction_train,
+            }
+        )
+        self.ridge_regressor = RidgeCV(alphas=[1.0])
+        self.ridge_regressor.fit(predictions_df_train, self.y_train)
+        self.evaluation(self.ridge_regressor)
+        return self.ridge_regressor
+
+    def ridge_test(self):
+        catboost_prediction_test = self.catboost.predict(self.test_X)
+        lgbm_prediction_test = self.lgbm.predict(self.test_X)
+        gb_prediction_test = self.gb_regressor.predict(self.test_X)
+        predictions_df_test = pd.DataFrame(
+            {
+                "CatBoost_Prediction": catboost_prediction_test,
+                "LGBM_Prediction": lgbm_prediction_test,
+                "GradientBoosting_Prediction": gb_prediction_test,
+            }
+        )
+        # ridge_regressor = self.ridge_train()
+        preds = self.ridge_regressor.predict(predictions_df_test)
+        return (
+            self.ridge_regressor,
+            self.catboost,
+            self.lgbm,
+            self.gb_regressor,
+            self.s_caler.inverse_transform(preds.reshape(-1, 1)).flatten(),
+        )
 
 
 class SmallNN:
