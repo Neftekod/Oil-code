@@ -36,6 +36,8 @@ embeddings:
 
 embeddings_descriptors:
   SmallNN:
+    input: [338, 1481]
+    input_test: [138, 1481]
     n_splits: 5
     neurons: 64
     activation: relu
@@ -43,7 +45,7 @@ embeddings_descriptors:
     learning_rate: 0.03
     lr_reduction_factor: 0.01
     lr_patience: 10
-    epochs: 1000
+    epochs: 300
     batch_size: 16
     verbose: 1
 
@@ -67,29 +69,143 @@ embeddings_descriptors:
     Lstm:
       input_layer: 6
 
-similarity_vectors:
+descriptors:
   SmallNN:
+    input: [338, 1097]
+    input_test: [138, 1097]
     n_splits: 5
     neurons: 64
     activation: relu
     output_activation: linear
-    learning_rate: 0.03
+    learning_rate: 0.0001
     lr_reduction_factor: 0.01
     lr_patience: 10
-    epochs: 1000
+    epochs: 300
     batch_size: 16
     verbose: 1
-
 
   torchRegressor:
     input: 690
     neurons: 128
-    alter_shapes: [15, 46]
+    alter_shapes: [1, 1481]
     lenear_input: 2176
     batch_size_train: 2
     batch_size_test: 2
     learning_rate: 0.001
+    learning_rate_gru: 0.005
     n_splits: 5
-    epochs: 120
+    epochs: 2
     clip_norm: 1.0
     verbose: 1
+    Conv:
+      input_layer: 88
+    Gru: 
+      input_layer: 4
+    Lstm:
+      input_layer: 6
+
+similarity:
+  SmallNN:
+    input: [338, 6]
+    input_test: [138, 6]
+    n_splits: 5
+    neurons: 64
+    activation: relu
+    output_activation: linear
+    learning_rate: 0.0001
+    lr_reduction_factor: 0.003
+    lr_patience: 10
+    epochs: 3000
+    batch_size: 16
+    verbose: 1
+
+  torchRegressor:
+    input: 690
+    neurons: 128
+    alter_shapes: [1, 1481]
+    lenear_input: 2176
+    batch_size_train: 2
+    batch_size_test: 2
+    learning_rate: 0.001
+    learning_rate_gru: 0.005
+    n_splits: 5
+    epochs: 2
+    clip_norm: 1.0
+    verbose: 1
+    Conv:
+      input_layer: 88
+    Gru: 
+      input_layer: 4
+    Lstm:
+      input_layer: 6
+
+mol_similarity:
+  SmallNN:
+    input: [338, 306]
+    input_test: [138, 306]
+    n_splits: 5
+    neurons: 64
+    activation: relu
+    output_activation: linear
+    learning_rate: 0.01
+    lr_reduction_factor: 0.003
+    lr_patience: 10
+    epochs: 3000
+    batch_size: 16
+    verbose: 1
+
+  torchRegressor:
+    input: 690
+    neurons: 128
+    alter_shapes: [1, 1481]
+    lenear_input: 2176
+    batch_size_train: 2
+    batch_size_test: 2
+    learning_rate: 0.001
+    learning_rate_gru: 0.005
+    n_splits: 5
+    epochs: 2
+    clip_norm: 1.0
+    verbose: 1
+    Conv:
+      input_layer: 88
+    Gru: 
+      input_layer: 4
+    Lstm:
+      input_layer: 6
+
+
+embeddings_sim:
+  SmallNN:
+    input: [338, 390]
+    input_test: [138, 390]
+    n_splits: 5
+    neurons: 64
+    activation: relu
+    output_activation: linear
+    learning_rate: 0.01
+    lr_reduction_factor: 0.003
+    lr_patience: 10
+    epochs: 5000
+    batch_size: 16
+    verbose: 1
+
+  torchRegressor:
+    input: 690
+    neurons: 128
+    alter_shapes: [10, 39]
+    lenear_input: 2176
+    batch_size_train: 2
+    batch_size_test: 2
+    learning_rate: 0.02
+    learning_rate_gru: 0.005
+    n_splits: 5
+    epochs: 250
+    clip_norm: 1.0
+    verbose: 1
+    Conv:
+      input_layer: 20
+    Gru: 
+      input_layer: 22
+    Lstm:
+      input_layer: 24

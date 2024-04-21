@@ -475,7 +475,7 @@ class SimpleRegressions:
 
         print("\nLGBMRegressor")
         self.lgbm = lgb.LGBMRegressor(
-            n_estimators=2000, learning_rate=0.1, random_state=3
+            n_estimators=2000, learning_rate=0.1, random_state=3, n_jobs=1
         )
         self.lgbm.fit(
             self.X_train,
@@ -515,9 +515,7 @@ class SimpleRegressions:
                 "GradientBoosting_Prediction": gb_prediction_test,
             }
         )
-        self.ridge_regressor = RandomForestRegressor(
-            n_estimators=1000, criterion="absolute_error", verbose=1
-        )
+        self.ridge_regressor = GradientBoostingRegressor(n_estimators=1000)
         self.ridge_regressor.fit(predictions_df_train, self.y_train_scaled)
         prediction = self.ridge_regressor.predict(predictions_df_test)
         prediction = self.s_caler.inverse_transform(prediction.reshape(-1, 1)).flatten()
@@ -548,8 +546,8 @@ class SimpleRegressions:
         return self.ridge_regressor
 
     def ridge_test(self):
-        catboost_prediction_test = self.catboost.predict(self.test_X)
-        lgbm_prediction_test = self.lgbm.predict(self.test_X)
+        catboost_prediction_test = self.catboost.predict(self.test_X, thread_count=1)
+        lgbm_prediction_test = self.lgbm.predict(self.test_X, num_threads=1)
         gb_prediction_test = self.gb_regressor.predict(self.test_X)
         predictions_df_test = pd.DataFrame(
             {
@@ -874,7 +872,7 @@ class DataLoader:
         fixed_arrays = [self.main_array[col] for col in self.static_cols]
         fixed_len = sum(len(arr[0]) for arr in fixed_arrays)
 
-        if self.dynamic_cols:
+        if len(self.dynamic_cols) > 0:
             add_dynamic_max_len = 6
             dynamic_col_data = self.main_array[self.dynamic_cols[0]]
             for i in range(len(self.main_array)):
@@ -882,7 +880,7 @@ class DataLoader:
                 for arr in fixed_arrays:
                     vec_ = np.concatenate([vec_, arr[i]])
 
-                if dynamic_col_data:
+                if dynamic_col_data is not None:
                     similarity_vectors = dynamic_col_data[i]
                     processed_vector = self.process_similarity_vectors(
                         similarity_vectors
@@ -1030,9 +1028,9 @@ class GRURegressor(nn.Module):
 
     def forward(self, x, y=None):
         shape1, shape2 = self.config["alter_shapes"]
-        print("Forward:: ДО::", x.shape)
+        # print("Forward:: ДО::", x.shape)
         x = x.reshape(x.shape[0], shape1, shape2)
-        print("\nForward:: После::", x.shape)
+        # print("\nForward:: После::", x.shape)
         if y is None:
             out, (hn, cn) = self.gru(x)
             out = out.reshape(out.shape[0], -1)
