@@ -1,5 +1,5 @@
 src/catboost_info
-src/materials/model_300dim.pkl
+src/materials/embed_model/model_300dim.pkl
 src/__pycache__
 src/materials/test_set_public.csv
 src/materials/smiles_test_set_public.csv

@@ -4,6 +4,10 @@ import numpy as np
 import os
 import dgl
 import yaml
+import random
+
+import torch
+import torch.nn as nn
 
 from rdkit import Chem
 from rdkit.Chem import AllChem, DataStructs
@@ -34,7 +38,6 @@ from tensorflow.keras.layers import LSTM, Dropout, Dense
 from tensorflow.keras.wrappers.scikit_learn import KerasRegressor
 from tensorflow.keras.callbacks import ReduceLROnPlateau
 from tensorflow.keras.callbacks import ModelCheckpoint
-import torch
 from tensorflow import keras
 
 from catboost import CatBoostRegressor
@@ -53,7 +56,10 @@ class PreprocessSMILES:
         return pd.read_csv(self.directory + filename)
 
     def preprocess_data(
-        self, filename: str, property_: str = "ad7e6027-00b8-4c27-918c-d1561f949ad8"
+        self,
+        filename: str,
+        filename_descriptors: str,
+        property_: str = "ad7e6027-00b8-4c27-918c-d1561f949ad8",
     ) -> pd.DataFrame:
         """
         Load data from a csv file and process it.
@@ -71,6 +77,7 @@ class PreprocessSMILES:
             Processed data as a pandas DataFrame.
         """
         df = self.load_data(filename)
+        descriptors = self.load_data(filename_descriptors)
         df = df[(df['oil_property_param_title'] == property_)]
         df = df[df['smiles'].notna()]
         df = df.groupby(['blend_id', 'oil_property_param_title', 'smiles']).agg({'oil_property_param_value': 'mean'}).reset_index()
@@ -86,6 +93,11 @@ class PreprocessSMILES:
         )
         rows_to_drop = df[df['mol'].isnull()].index
         df = df.drop(df[df['blend_id'].isin(df.loc[rows_to_drop, 'blend_id'])].index)
+        df["descriptors_array"] = (
+            pd.merge(df, descriptors, on="smiles", how="left")
+            .iloc[:, 6:]
+            .values.tolist()
+        )
         return df
 
     def calculate_similarity(self, smiles_list):
@@ -107,7 +119,7 @@ class PreprocessSMILES:
             for j in range(i + 1, len(smiles_list)):
                 similarity_score = DataStructs.TanimotoSimilarity(fps[i], fps[j])
                 similarity_vectors.append(similarity_score)
-        return similarity_vectors
+        return np.array(similarity_vectors)
 
     def concatenate_sentences(self, vec_list) -> List:
         """
@@ -141,7 +153,7 @@ class PreprocessSMILES:
         pd.DataFrame
             Preprocessed data with mol2vec embeddings, where each row is a sample and contains the mol2vec embeddings in a column named 'mol2vec'.
         """
-        model = word2vec.Word2Vec.load(self.directory + 'model_300dim.pkl')
+        model = word2vec.Word2Vec.load(self.directory + "/embed_model/model_300dim.pkl")
         df["sentence"] = df.apply(
             lambda x: MolSentence(mol2alt_sentence(x["mol"], 1)), axis=1
         )
@@ -153,6 +165,7 @@ class PreprocessSMILES:
         grouped_df["mol2vec"] = [
             DfVec(x) for x in sentences2vec(grouped_df["sentence"], model, unseen="UNK")
         ]
+        grouped_df["mol2vec"] = grouped_df["mol2vec"].apply(lambda x: x.vec)
         return grouped_df
 
     def mol_to_dgl_graph(self, mol: Chem.Mol) -> dgl.DGLGraph:
@@ -234,7 +247,7 @@ class PreprocessSMILES:
             # if embeddings.size(1) < max_length:
             #     padding = torch.zeros(embeddings.size(0), max_length - embeddings.size(1), embeddings.size(2))
             #     embeddings = torch.cat((embeddings, padding), dim=1)
-            return embeddings[0].tolist()
+            return np.array(embeddings[0].tolist())
 
         model_path = "embed_model/" + model
 
@@ -284,6 +297,7 @@ class PreprocessSMILES:
                 {
                     "canonical_smiles": lambda x: ", ".join(x),
                     "smiles": lambda x: ", ".join(x),
+                    "descriptors_array": lambda x: x.tolist(),
                     "oil_property_param_value": "mean",
                 }
             )
@@ -315,10 +329,7 @@ class PreprocessSMILES:
         target = df.groupby('blend_id')['oil_property_param_value'].mean().dropna()
         blend_id_without_nulls = df.groupby('blend_id')['oil_property_param_value'].mean().dropna().index.tolist()
         df = df[df["blend_id"].isin(blend_id_without_nulls)][column]
-        if column == "mol2vec":
-            X = np.array([x.vec for x in df[column]])
-        else:
-            X = np.vstack(np.array(df, dtype=object))
+        X = np.vstack(np.array(df, dtype=object))
         y = target.values.astype(np.float64)
         return X, y
 
@@ -556,7 +567,9 @@ class SmallNN:
         model, score = self.neural_model()
         self.evaluation(model)
 
+
 class LstmRegressor:
+
     def __init__(
         self,
         units=50,
@@ -565,7 +578,7 @@ class LstmRegressor:
         optimizer="rmsprop",
         epochs=20,
         batch_size=64,
-        neurons_1=128,
+        neurons_1=689,
         neurons_2=64,
         scaler=None,
     ):
@@ -601,7 +614,7 @@ class LstmRegressor:
         input_shape = (X_train.shape[1], 1)
         if self.scaler:
             y_train_scaled = self.scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
-            y_test_scaled = self.scaler.fit_transform(y_test.reshape(-1, 1)).flatten()
+            y_test_scaled = self.scaler.transform(y_test.reshape(-1, 1)).flatten()
         else:
             y_train_scaled = y_train
             y_test_scaled = y_test
@@ -677,3 +690,441 @@ class LstmRegressor:
             verbose=verbose,
         )
         return checkpoint
+
+
+class Dataset:
+    def __init__(self, data_x, data_y=None):
+        super(Dataset, self).__init__()
+        self.data_x = data_x
+        self.data_y = data_y
+
+    def __len__(self):
+        return len(self.data_x)
+
+    def __getitem__(self, idx):
+        if self.data_y is not None:
+            return self.data_x[idx], self.data_y[idx]
+        else:
+            return self.data_x[idx]
+
+    def augment_data(self, x_, y_):
+        copy_x = x_.copy()
+        new_x = []
+        new_y = y_.copy()
+        dim = x_.shape[2]
+        k = int(0.3 * dim)
+        for i in range(x_.shape[0]):
+            idx = random.sample(range(dim), k=k)
+            copy_x[i, :, idx] = 0
+            new_x.append(copy_x[i])
+        return np.stack(new_x, axis=0), new_y
+
+
+class DataLoader:
+    def __init__(self, main_array, static_cols, dynamic_cols):
+        self.main_array = main_array
+        self.static_cols = static_cols
+        self.dynamic_cols = dynamic_cols
+        self.data_x = self.combine_features()
+        self.data_y = np.array(main_array["oil_property_param_value"]).reshape(-1, 1)
+
+    def process_similarity_vectors(self, similarity_vectors):
+        if (
+            len(similarity_vectors) == 0
+        ):  # если была только 1 молекула, то сходства нет - 0
+            return np.array([0, 0, 0, 0, 0, 0])
+        else:
+            from scipy.stats import kurtosis
+
+            min_value = np.min(similarity_vectors)
+            mean_value = np.mean(similarity_vectors)
+            median_value = np.median(similarity_vectors)
+            max_value = np.max(similarity_vectors)
+            kurtosis_value = kurtosis(similarity_vectors)
+            std_value = np.std(similarity_vectors)
+            processed_vector = np.array(
+                [
+                    min_value,
+                    mean_value,
+                    median_value,
+                    max_value,
+                    std_value,
+                    kurtosis_value,
+                ]
+            )
+            return processed_vector
+
+    def combine_features(self):
+        new_vecs = []
+        fixed_arrays = [self.main_array[col] for col in self.static_cols]
+        fixed_len = sum(arr[0].shape[0] for arr in fixed_arrays)
+        add_dynamic_max_len = 6
+
+        for i in range(len(self.main_array)):
+            vec_ = np.array([])
+            for arr in fixed_arrays:
+                vec_ = np.concatenate([vec_, arr[i]])
+
+            similarity_vectors = self.main_array[self.dynamic_cols[0]][i]
+            processed_vector = self.process_similarity_vectors(similarity_vectors)
+            pad_len = add_dynamic_max_len - processed_vector.shape[0]
+            processed_vector_padded = np.pad(
+                processed_vector, (0, pad_len), mode="constant", constant_values=0
+            )
+
+            vec_ = np.concatenate([vec_, processed_vector_padded])
+
+            new_vecs.append(vec_)
+
+        max_len = fixed_len + add_dynamic_max_len
+        return np.array(new_vecs).reshape(len(self.main_array), 1, max_len)
+
+    def get_dataset(self):
+        if self.data_y is not None:
+            print(f"Shape of data_x: {self.data_x.shape}")
+            print(f"Shape of data_y: {self.data_y.shape}")
+            return Dataset(self.data_x, self.data_y)
+        else:
+            print(f"Shape of data_x: {self.data_x.shape}")
+            return Dataset(self.data_x), None
+
+
+class ConvRegressor(nn.Module):
+    def __init__(self, config):
+        super(ConvRegressor, self).__init__()
+        self.name = "ConvRegressor"
+        self.config = config
+        self.conv_block = nn.Sequential(
+            nn.Conv1d(1, 8, 5, stride=1, padding=0),
+            nn.Dropout(0.3),
+            nn.Conv1d(8, 8, 5, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv1d(8, 16, 5, stride=2, padding=0),
+            nn.Dropout(0.3),
+            nn.AvgPool1d(11),
+            nn.Conv1d(16, 4, 3, stride=3, padding=0),
+            nn.Flatten(),
+        )
+
+        self.linear = nn.Sequential(
+            nn.Linear(40, 6),
+            nn.Dropout(0.3),
+            nn.ReLU(),
+            nn.Linear(6, 64),
+            nn.Dropout(0.3),
+            nn.ReLU(),
+        )
+        self.head1 = nn.Linear(64, 1)
+
+        self.loss1 = nn.MSELoss()
+        self.loss3 = nn.L1Loss()
+
+    def forward(self, x, y=None):
+        if y is None:
+            out = self.conv_block(x)
+            out = self.head1(self.linear(out))
+            return out
+        else:
+            out = self.conv_block(x)
+            out = self.head1(self.linear(out))
+            loss1 = 0.4 * self.loss1(out, y) + 0.6 * self.loss3(out, y)
+            return loss1
+
+
+class LSTMRegressor(nn.Module):
+    def __init__(self, config):
+        super(LSTMRegressor, self).__init__()
+        self.name = "LSTMRegressor"
+        self.config = config
+        self.lstm = nn.LSTM(
+            self.config["alter_shapes"][1],
+            self.config["neurons"],
+            num_layers=2,
+            batch_first=True,
+        )
+        self.linear = nn.Sequential(
+            nn.Linear(self.config["lenear_input"], 1024),
+            nn.Dropout(0.3),
+            nn.ReLU(),
+            nn.Linear(1024, 512),
+            nn.Dropout(0.3),
+            nn.ReLU(),
+        )
+        self.head1 = nn.Linear(512, 1)
+
+        self.loss1 = nn.MSELoss()
+        self.loss3 = nn.L1Loss()
+
+    def forward(self, x, y=None):
+        shape1, shape2 = self.config["alter_shapes"]
+        x = x.reshape(x.shape[0], shape1, shape2)
+        if y is None:
+            out, (hn, cn) = self.lstm(x)
+            out = out.reshape(out.shape[0], -1)
+            out = torch.cat([out, hn.reshape(hn.shape[1], -1)], dim=1)
+            out = self.head1(self.linear(out))
+            return out
+        else:
+            out, (hn, cn) = self.lstm(x)
+
+            out = out.reshape(out.shape[0], -1)
+            out = torch.cat([out, hn.reshape(hn.shape[1], -1)], dim=1)
+            out = self.head1(self.linear(out))
+            loss1 = 0.4 * self.loss1(out, y) + 0.6 * self.loss3(out, y)
+            return loss1
+
+
+class GRURegressor(nn.Module):
+    def __init__(self, config):
+        super(GRURegressor, self).__init__()
+        self.name = "GRURegressor"
+        self.config = config
+        self.gru = nn.GRU(
+            self.config["alter_shapes"][1],
+            self.config["neurons"],
+            num_layers=2,
+            batch_first=True,
+        )
+        self.linear = nn.Sequential(
+            nn.Linear(self.config["lenear_input"], 1024),
+            nn.Dropout(0.3),
+            nn.ReLU(),
+            nn.Linear(1024, 512),
+            nn.Dropout(0.3),
+            nn.ReLU(),
+        )
+        self.head1 = nn.Linear(512, 1)
+
+        self.loss1 = nn.MSELoss()
+        self.loss3 = nn.L1Loss()
+
+    def forward(self, x, y=None):
+        shape1, shape2 = self.config["alter_shapes"]
+        x = x.reshape(x.shape[0], shape1, shape2)
+        if y is None:
+            out, (hn, cn) = self.gru(x)
+            out = out.reshape(out.shape[0], -1)
+            out = torch.cat([out, hn.reshape(hn.shape[1], -1)], dim=1)
+            out = self.head1(self.linear(out))
+            return out
+        else:
+            out, (hn, cn) = self.gru(x)
+
+            out = out.reshape(out.shape[0], -1)
+            out = torch.cat([out, hn.reshape(hn.shape[1], -1)], dim=1)
+            out = self.head1(self.linear(out))
+            loss1 = 0.4 * self.loss1(out, y) + 0.6 * self.loss3(out, y)
+            return loss1
+
+
+class Training:
+
+    def __init__(self, config):
+        self.scaler = StandardScaler()
+        self.config = config
+
+    def train_step(self, dataloader, model, opt, clip_norm):
+        model.train()
+        train_losses = []
+        for x, target in dataloader:
+            if torch.cuda.is_available():
+                model.cuda()
+                x = x.cuda()
+                target = target.cuda()
+            loss = model(x, target)
+            train_losses.append(loss.item())
+            opt.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
+            opt.step()
+        return np.mean(train_losses)
+
+    def validation_step(self, dataloader, model):
+        model.eval()
+        val_losses = []
+        val_mse = []
+        val_mae = []
+        for x, target in dataloader:
+            if torch.cuda.is_available():
+                model.cuda()
+                x = x.cuda()
+                target = target.cuda()
+            loss = model(x, target)
+            pred = self.scaler.inverse_transform(model(x).detach().cpu().numpy())
+            rescale_y = self.scaler.inverse_transform(target.cpu().numpy())
+            val_mse.append(mean_squared_error(pred, rescale_y))
+            val_mae.append(mean_absolute_error(pred, rescale_y))
+            val_losses.append(loss.item())
+        return np.mean(val_losses), np.mean(val_mse), np.mean(val_mae)
+
+    def train_function(
+        self, model, x_train, y_train, x_val, y_val, epochs=20, clip_norm=1.0
+    ):
+        from torch.utils.data import DataLoader
+
+        if model.name in ["GRURegressor"]:
+            print("lr", 0.0003)
+            opt = torch.optim.Adam(model.parameters(), lr=0.0003)
+        else:
+            print("lr", 0.01)
+            opt = torch.optim.Adam(model.parameters(), lr=self.config["learning_rate"])
+        if torch.cuda.is_available():
+            model.cuda()
+
+        data_x_train = torch.FloatTensor(x_train)
+        data_y_train = torch.FloatTensor(y_train)
+        data_x_val = torch.FloatTensor(x_val)
+        data_y_val = torch.FloatTensor(y_val)
+        train_dataloader = DataLoader(
+            Dataset(data_x_train, data_y_train),
+            num_workers=4,
+            batch_size=self.config["batch_size_train"],
+            shuffle=True,
+        )
+        val_dataloader = DataLoader(
+            Dataset(data_x_val, data_y_val),
+            num_workers=4,
+            batch_size=self.config["batch_size_train"],
+            shuffle=False,
+        )
+        best_loss = np.inf
+        best_weights = None
+
+        history = {"train_loss": [], "val_loss": [], "val_mse": [], "val_mae": []}
+
+        for e in range(epochs):
+            loss = self.train_step(train_dataloader, model, opt, clip_norm)
+            val_loss, val_mse, val_mae = self.validation_step(val_dataloader, model)
+            history["train_loss"].append(loss)
+            history["val_loss"].append(val_loss)
+            history["val_mse"].append(val_mse)
+            history["val_mae"].append(val_mae)
+
+            if val_mse < best_loss:
+                best_loss = val_mse
+                best_weights = model.state_dict()
+                print("BEST ----> ")
+            print(
+                f"{model.name} Epoch {e}, train_loss {round(loss,3)}, val_loss {round(val_loss, 3)}, val_mse {val_mse}"
+            )
+        model.load_state_dict(best_weights)
+        return model, history
+
+    def plot_training_history(self, history):
+        plt.figure(figsize=(24, 8))
+
+        plt.subplot(1, 2, 1)
+        plt.plot(history["train_loss"], label="Training Loss", color="blue")
+        plt.plot(history["val_loss"], label="Validation Loss", color="red")
+        plt.title("Loss")
+        plt.xlabel("Epochs")
+        plt.legend()
+
+        plt.subplot(1, 2, 2)
+        plt.plot(history["val_mse"], label="Validation MSE", color="green")
+        plt.title("Metrics")
+        plt.xlabel("Epochs")
+        plt.legend(loc="upper right")
+
+        plt.tight_layout()
+        plt.show()
+
+    def cross_validate_models(self, X, y, epochs=120, clip_norm=1.0):
+        y_scaler = self.scaler.fit_transform(y)
+        splits = 3
+        kf_cv = KFold(n_splits=splits, shuffle=True, random_state=42)
+        trained_models = []
+        for i, (train_idx, val_idx) in enumerate(kf_cv.split(X)):
+            print(f"\nSplit {i+1}/{splits}...")
+            x_train, x_val = X[train_idx], X[val_idx]
+            y_train, y_val = y_scaler[train_idx], y_scaler[val_idx]
+            for Model in [
+                # GRURegressor,
+                ConvRegressor,
+                LSTMRegressor,
+            ]:  # [GRURegressor, LSTMRegressor, ConvRegressor]
+                model = Model(self.config)
+                model, history = self.train_function(
+                    model,
+                    x_train,
+                    y_train,
+                    x_val,
+                    y_val,
+                    epochs=epochs,
+                    clip_norm=clip_norm,
+                )
+                self.plot_training_history(history)
+                model.to("cpu")
+                trained_models.append(model)
+                torch.cuda.empty_cache()
+        return trained_models
+
+    def inference_pytorch(self, model, dataloader):
+        model.eval()
+        preds = []
+        for x in dataloader:
+            if torch.cuda.is_available():
+                model.cuda()
+                x = x.cuda()
+            pred = self.scaler.inverse_transform(model(x).detach().cpu().numpy())
+            preds.append(pred)
+        model.to("cpu")
+        torch.cuda.empty_cache()
+        return np.concatenate(preds, axis=0)
+
+    def average_prediction(self, X_test, trained_models):
+        from torch.utils.data import DataLoader
+
+        all_preds = []
+        test_dataloader = DataLoader(
+            Dataset(torch.FloatTensor(X_test)),
+            num_workers=4,
+            batch_size=self.config["batch_size_test"],
+            shuffle=False,
+        )
+        for i, model in enumerate(trained_models):
+            current_pred = self.inference_pytorch(model, test_dataloader)
+            all_preds.append(current_pred)
+        return np.stack(all_preds, axis=1).mean(axis=1)
+
+    def weighted_average_prediction(
+        self, X_test, trained_models, model_wise=[0.25, 0.35, 0.40], fold_wise=None
+    ):
+        all_preds = []
+        test_dataloader = DataLoader(
+            Dataset(torch.FloatTensor(X_test)),
+            num_workers=4,
+            batch_size=self.config["batch_size_test"],
+            shuffle=False,
+        )
+        for i, model in enumerate(trained_models):
+            current_pred = self.inference_pytorch(model, test_dataloader)
+            current_pred = model_wise[i % 3] * current_pred
+            if fold_wise:
+                current_pred = fold_wise[i // 3] * current_pred
+            all_preds.append(current_pred)
+        return np.stack(all_preds, axis=1).sum(axis=1)
+
+
+# -------------- ADD FUNCTIONS ------------------------------- #
+
+
+def load_config(file_path: str, model_name: str):
+    with open(file_path, "r") as f:
+        config = yaml.safe_load(f)
+    return config[model_name]
+
+
+def seed_everything():
+    seed = 42
+    random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    print("-----Seed Set!-----")

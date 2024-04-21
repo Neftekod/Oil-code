@@ -10,3 +10,29 @@ SmallNN:
   epochs: 400
   batch_size: 64
   verbose: 1
+
+
+ConvRegressor:
+  input: 689
+  neurons: 128
+  alter_shapes: [15, 46]
+  lenear_input: 2176
+  batch_size_train: 6
+  batch_size_test: 8
+  learning_rate: 0.001
+GRURegressor:
+  input: 689
+  neurons: 128
+  alter_shapes: [15, 46]
+  lenear_input: 2176
+  batch_size_train: 6
+  batch_size_test: 8
+  learning_rate: 0.001
+LSTMRegressor:
+  input: 689
+  neurons: 128
+  alter_shapes: [15, 46]
+  lenear_input: 2176
+  batch_size_train: 6
+  batch_size_test: 8
+  learning_rate: 0.001
