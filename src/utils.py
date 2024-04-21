@@ -48,9 +48,10 @@ import matplotlib.pyplot as plt
 
 class PreprocessSMILES:
 
-    def __init__(self, directory, base_on="smiles"):
+    def __init__(self, directory, base_on="smiles", task="train"):
         self.directory = directory
         self.base_on_smiles = base_on
+        self.task = task
 
     def load_data(self, filename):
         return pd.read_csv(self.directory + filename)
@@ -78,9 +79,14 @@ class PreprocessSMILES:
         """
         df = self.load_data(filename)
         descriptors = self.load_data(filename_descriptors)
-        df = df[(df['oil_property_param_title'] == property_)]
+        if "train" in filename and self.task == "train":
+            df = df[(df["oil_property_param_title"] == property_)]
         df = df[df['smiles'].notna()]
-        df = df.groupby(['blend_id', 'oil_property_param_title', 'smiles']).agg({'oil_property_param_value': 'mean'}).reset_index()
+        df = (
+            df.groupby(["blend_id", "smiles"])
+            .agg({"oil_property_param_value": "mean"})
+            .reset_index()
+        )
         df["mol"] = df["smiles"].apply(Chem.MolFromSmiles)
         df["canonical_smiles"] = df["smiles"].apply(
             lambda x: (
@@ -94,7 +100,7 @@ class PreprocessSMILES:
         rows_to_drop = df[df['mol'].isnull()].index
         df = df.drop(df[df['blend_id'].isin(df.loc[rows_to_drop, 'blend_id'])].index)
         df["descriptors_array"] = (
-            pd.merge(df, descriptors, on="smiles", how="left")
+            pd.merge(df, descriptors, on="smiles", how="inner")  # ! change
             .iloc[:, 6:]
             .values.tolist()
         )
@@ -277,7 +283,7 @@ class PreprocessSMILES:
         df["embeddings"] = df.apply(process_row, axis=1)
         return df
 
-    def smiles2sentence(self, df: pd.DataFrame) -> pd.DataFrame:
+    def smiles2sentence(self, df: pd.DataFrame, task: str = "test") -> pd.DataFrame:
         """
         Aggregate SMILES data by blend_id and oil_property_param_title to form sentences.
 
@@ -295,22 +301,41 @@ class PreprocessSMILES:
             arrays_np = np.array(arrays)
             summed_array = np.sum(arrays_np, axis=0)
             return np.array(summed_array)
-
-        df = (
-            df.groupby(by=["blend_id", "oil_property_param_title"])
-            .agg(
-                func={
-                    "canonical_smiles": lambda x: ", ".join(x),
-                    "smiles": lambda x: ", ".join(x),
-                    "descriptors_array": lambda x: [sum_arrays(arr) for arr in zip(*x)],
-                    "oil_property_param_value": "mean",
-                }
+        if task == "train":
+            df = (
+                df.groupby(by=["blend_id"])
+                .agg(
+                    func={
+                        "canonical_smiles": lambda x: ", ".join(x),
+                        "smiles": lambda x: ", ".join(x),
+                        "descriptors_array": lambda x: [
+                            sum_arrays(arr) for arr in zip(*x)
+                        ],
+                        "oil_property_param_value": "mean",
+                    }
+                )
+                .reset_index()
             )
-            .reset_index()
-        )
-        df["similarity_vectors"] = df["smiles"].apply(
-            lambda x: self.calculate_similarity(x.split(", "))
-        )
+            df["similarity_vectors"] = df["smiles"].apply(
+                lambda x: self.calculate_similarity(x.split(", "))
+            )
+        else:
+            df = (
+                df.groupby(by=["blend_id"])
+                .agg(
+                    func={
+                        "canonical_smiles": lambda x: ", ".join(x),
+                        "smiles": lambda x: ", ".join(x),
+                        "descriptors_array": lambda x: [
+                            sum_arrays(arr) for arr in zip(*x)
+                        ],
+                    }
+                )
+                .reset_index()
+            )
+            df["similarity_vectors"] = df["smiles"].apply(
+                lambda x: self.calculate_similarity(x.split(", "))
+            )
         return df
 
     def xy_split(
@@ -706,12 +731,19 @@ class Dataset:
 
 
 class DataLoader:
-    def __init__(self, main_array, static_cols, dynamic_cols):
+
+    def __init__(self, main_array, static_cols, dynamic_cols, task="train"):
         self.main_array = main_array
         self.static_cols = static_cols
         self.dynamic_cols = dynamic_cols
         self.data_x = self.combine_features()
-        self.data_y = np.array(main_array["oil_property_param_value"]).reshape(-1, 1)
+        self.task = task
+        if self.task == "train":
+            self.data_y = np.array(main_array["oil_property_param_value"]).reshape(
+                -1, 1
+            )
+        else:
+            self.data_y = None
 
     def process_similarity_vectors(self, similarity_vectors):
         if (
@@ -922,11 +954,12 @@ class GRURegressor(nn.Module):
 
 class Training:
 
-    def __init__(self, config, X, cross_validation=True, y=None):
+    def __init__(self, config, X, y, test_X, cross_validation=True):
         self.scaler = StandardScaler()
         self.config = config
         self.cross_validation = cross_validation
         self.X = X
+        self.test_X = test_X
         self.y = y
         self.y_scale = self.scaler.fit_transform(self.y)
         self.trained_models = self.cross_validate_models(
@@ -1170,12 +1203,12 @@ class Training:
         torch.cuda.empty_cache()
         return np.concatenate(preds, axis=0)
 
-    def average_prediction(self, X_test):
+    def average_prediction(self):
         from torch.utils.data import DataLoader
 
         all_preds = []
         test_dataloader = DataLoader(
-            Dataset(torch.FloatTensor(X_test)),
+            Dataset(torch.FloatTensor(self.test_X)),
             num_workers=4,
             batch_size=self.config["batch_size_test"],
             shuffle=False,
@@ -1185,12 +1218,10 @@ class Training:
             all_preds.append(current_pred)
         return np.stack(all_preds, axis=1).mean(axis=1)
 
-    def weighted_average_prediction(
-        self, X_test, model_wise=[0.25, 0.35, 0.40], fold_wise=None
-    ):
+    def weighted_average_prediction(self, model_wise=[0.5, 0.25, 0.25], fold_wise=None):
         all_preds = []
         test_dataloader = DataLoader(
-            Dataset(torch.FloatTensor(X_test)),
+            Dataset(torch.FloatTensor(self.test_X)),
             num_workers=4,
             batch_size=self.config["batch_size_test"],
             shuffle=False,
