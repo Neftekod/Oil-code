@@ -1,38 +1,87 @@
 # Configuration file for neural network model
-SmallNN:
-  n_splits: 3
-  neurons: 64
-  activation: relu
-  output_activation: linear
-  learning_rate: 0.001
-  lr_reduction_factor: 0.001
-  lr_patience: 10
-  epochs: 400
-  batch_size: 64
-  verbose: 1
+embeddings:
+  SmallNN:
+    input: [328, 384]
+    n_splits: 5
+    neurons: 64
+    activation: relu
+    output_activation: linear
+    learning_rate: 0.03
+    lr_reduction_factor: 0.01
+    lr_patience: 10
+    epochs: 300
+    batch_size: 16
+    verbose: 1
+
+  torchRegressor:
+    input: 384
+    neurons: 128
+    alter_shapes: [12, 32]
+    lenear_input: 2176
+    batch_size_train: 2
+    batch_size_test: 2
+    learning_rate: 0.001
+    learning_rate_gru: 0.005
+    n_splits: 1
+    epochs: 120
+    clip_norm: 1.0
+    verbose: 1
+    Conv:
+      input_layer: 20
+    Gru: 
+      input_layer: 26
+    Lstm:
+      input_layer: 28
+
+mol2vec:
+  SmallNN:
+    n_splits: 5
+    neurons: 64
+    activation: relu
+    output_activation: linear
+    learning_rate: 0.03
+    lr_reduction_factor: 0.01
+    lr_patience: 10
+    epochs: 1000
+    batch_size: 16
+    verbose: 1
+
+  torchRegressor:
+    input: 690
+    neurons: 128
+    alter_shapes: [15, 46]
+    lenear_input: 2176
+    batch_size_train: 2
+    batch_size_test: 2
+    learning_rate: 0.001
+    n_splits: 5
+    epochs: 120
+    clip_norm: 1.0
+    verbose: 1
+
+similarity_vectors:
+  SmallNN:
+    n_splits: 5
+    neurons: 64
+    activation: relu
+    output_activation: linear
+    learning_rate: 0.03
+    lr_reduction_factor: 0.01
+    lr_patience: 10
+    epochs: 1000
+    batch_size: 16
+    verbose: 1
 
 
-ConvRegressor:
-  input: 689
-  neurons: 128
-  alter_shapes: [15, 46]
-  lenear_input: 2176
-  batch_size_train: 6
-  batch_size_test: 8
-  learning_rate: 0.001
-GRURegressor:
-  input: 689
-  neurons: 128
-  alter_shapes: [15, 46]
-  lenear_input: 2176
-  batch_size_train: 6
-  batch_size_test: 8
-  learning_rate: 0.001
-LSTMRegressor:
-  input: 689
-  neurons: 128
-  alter_shapes: [15, 46]
-  lenear_input: 2176
-  batch_size_train: 6
-  batch_size_test: 8
-  learning_rate: 0.001
+  torchRegressor:
+    input: 690
+    neurons: 128
+    alter_shapes: [15, 46]
+    lenear_input: 2176
+    batch_size_train: 2
+    batch_size_test: 2
+    learning_rate: 0.001
+    n_splits: 5
+    epochs: 120
+    clip_norm: 1.0
+    verbose: 1

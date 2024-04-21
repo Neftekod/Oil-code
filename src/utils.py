@@ -291,13 +291,18 @@ class PreprocessSMILES:
         pd.DataFrame
             Aggregated data with sentences formed by concatenating SMILES strings by blend_id and oil_property_param_title.
         """
+        def sum_arrays(arrays):
+            arrays_np = np.array(arrays)
+            summed_array = np.sum(arrays_np, axis=0)
+            return np.array(summed_array)
+
         df = (
-            df.groupby(["blend_id", "oil_property_param_title"])
+            df.groupby(by=["blend_id", "oil_property_param_title"])
             .agg(
-                {
+                func={
                     "canonical_smiles": lambda x: ", ".join(x),
                     "smiles": lambda x: ", ".join(x),
-                    "descriptors_array": lambda x: x.tolist(),
+                    "descriptors_array": lambda x: [sum_arrays(arr) for arr in zip(*x)],
                     "oil_property_param_value": "mean",
                 }
             )
@@ -426,7 +431,7 @@ class SimpleRegressions:
     def fit_and_evaluate(self):
         print("Catboost")
         catboost = CatBoostRegressor(
-            iterations=1000, learning_rate=0.1, loss_function="RMSE", random_seed=1
+            iterations=2000, learning_rate=0.1, loss_function="RMSE", random_seed=1
         )
         catboost.fit(
             self.X_train,
@@ -436,24 +441,8 @@ class SimpleRegressions:
         )
         self.evaluation(catboost)
 
-        print("RandomForestRegressor")
-        rf = RandomForestRegressor(n_estimators=1000, random_state=42)
-        rf.fit(self.X_train, self.y_train_scaled)
-        self.evaluation(rf)
-
-        print("XGBRegressor")
-        xgboost = xgb.XGBRegressor(n_estimators=1000, learning_rate=0.1, random_state=8)
-        xgboost.fit(
-            self.X_train,
-            self.y_train_scaled,
-            eval_set=[(self.X_test, self.y_test_scaled)],
-            early_stopping_rounds=10,
-            verbose=1,
-        )
-        self.evaluation(xgboost)
-
-        print("LGBMRegressor")
-        lgbm = lgb.LGBMRegressor(n_estimators=1000, learning_rate=0.1, random_state=3)
+        print("\nLGBMRegressor")
+        lgbm = lgb.LGBMRegressor(n_estimators=2000, learning_rate=0.1, random_state=3)
         lgbm.fit(
             self.X_train,
             self.y_train_scaled,
@@ -461,22 +450,18 @@ class SimpleRegressions:
         )
         self.evaluation(lgbm)
 
-        print("GradientBoostingRegressor")
+        print("\nGradientBoostingRegressor")
         gb_regressor = GradientBoostingRegressor(
-            n_estimators=1000, learning_rate=0.1, random_state=45
+            n_estimators=2000, learning_rate=0.1, random_state=45
         )
         gb_regressor.fit(self.X_train, self.y_train_scaled)
         self.evaluation(gb_regressor)
 
-        print("SVR")
-        svr = SVR(kernel="rbf")
-        svr.fit(self.X_train, self.y_train_scaled)
-        self.evaluation(svr)
-
 
 class SmallNN:
-    def __init__(self, X: np.ndarray, y: np.ndarray):
-        self.config = self.load_config("config.yml")
+
+    def __init__(self, X: np.ndarray, y: np.ndarray, config):
+        self.config = config
 
         if X is None or y is None:
             raise ValueError("X and y cannot be None")
@@ -756,25 +741,42 @@ class DataLoader:
 
     def combine_features(self):
         new_vecs = []
+        add_dynamic_max_len = 0
+        fixed_len = 0
         fixed_arrays = [self.main_array[col] for col in self.static_cols]
-        fixed_len = sum(arr[0].shape[0] for arr in fixed_arrays)
-        add_dynamic_max_len = 6
+        fixed_len = sum(len(arr[0]) for arr in fixed_arrays)
 
-        for i in range(len(self.main_array)):
-            vec_ = np.array([])
-            for arr in fixed_arrays:
-                vec_ = np.concatenate([vec_, arr[i]])
+        if self.dynamic_cols:
+            add_dynamic_max_len = 6
+            dynamic_col_data = self.main_array[self.dynamic_cols[0]]
+            for i in range(len(self.main_array)):
+                vec_ = np.array([])
+                for arr in fixed_arrays:
+                    vec_ = np.concatenate([vec_, arr[i]])
 
-            similarity_vectors = self.main_array[self.dynamic_cols[0]][i]
-            processed_vector = self.process_similarity_vectors(similarity_vectors)
-            pad_len = add_dynamic_max_len - processed_vector.shape[0]
-            processed_vector_padded = np.pad(
-                processed_vector, (0, pad_len), mode="constant", constant_values=0
-            )
+                if dynamic_col_data:
+                    similarity_vectors = dynamic_col_data[i]
+                    processed_vector = self.process_similarity_vectors(
+                        similarity_vectors
+                    )
+                    pad_len = add_dynamic_max_len - processed_vector.shape[0]
+                    processed_vector_padded = np.pad(
+                        processed_vector,
+                        (0, pad_len),
+                        mode="constant",
+                        constant_values=0,
+                    )
 
-            vec_ = np.concatenate([vec_, processed_vector_padded])
+                    vec_ = np.concatenate([vec_, processed_vector_padded])
 
-            new_vecs.append(vec_)
+                new_vecs.append(vec_)
+
+        else:
+            for i in range(len(self.main_array)):
+                vec_ = np.array([])
+                for arr in fixed_arrays:
+                    vec_ = np.concatenate([vec_, arr[i]])
+                new_vecs.append(vec_)
 
         max_len = fixed_len + add_dynamic_max_len
         return np.array(new_vecs).reshape(len(self.main_array), 1, max_len)
@@ -807,14 +809,14 @@ class ConvRegressor(nn.Module):
         )
 
         self.linear = nn.Sequential(
-            nn.Linear(40, 6),
+            nn.Linear(self.config["Conv"]["input_layer"], 1024),
             nn.Dropout(0.3),
             nn.ReLU(),
-            nn.Linear(6, 64),
+            nn.Linear(1024, 512),
             nn.Dropout(0.3),
             nn.ReLU(),
         )
-        self.head1 = nn.Linear(64, 1)
+        self.head1 = nn.Linear(512, 1)
 
         self.loss1 = nn.MSELoss()
         self.loss3 = nn.L1Loss()
@@ -838,12 +840,12 @@ class LSTMRegressor(nn.Module):
         self.config = config
         self.lstm = nn.LSTM(
             self.config["alter_shapes"][1],
-            self.config["neurons"],
+            self.config["batch_size_train"],
             num_layers=2,
             batch_first=True,
         )
         self.linear = nn.Sequential(
-            nn.Linear(self.config["lenear_input"], 1024),
+            nn.Linear(self.config["Lstm"]["input_layer"], 1024),
             nn.Dropout(0.3),
             nn.ReLU(),
             nn.Linear(1024, 512),
@@ -881,12 +883,12 @@ class GRURegressor(nn.Module):
         self.config = config
         self.gru = nn.GRU(
             self.config["alter_shapes"][1],
-            self.config["neurons"],
+            self.config["batch_size_train"],
             num_layers=2,
             batch_first=True,
         )
         self.linear = nn.Sequential(
-            nn.Linear(self.config["lenear_input"], 1024),
+            nn.Linear(self.config["Gru"]["input_layer"], 1024),
             nn.Dropout(0.3),
             nn.ReLU(),
             nn.Linear(1024, 512),
@@ -900,7 +902,9 @@ class GRURegressor(nn.Module):
 
     def forward(self, x, y=None):
         shape1, shape2 = self.config["alter_shapes"]
+        # print("Forward:: ДО::", x.shape)
         x = x.reshape(x.shape[0], shape1, shape2)
+        # print("\nForward:: После::", x.shape)
         if y is None:
             out, (hn, cn) = self.gru(x)
             out = out.reshape(out.shape[0], -1)
@@ -909,7 +913,6 @@ class GRURegressor(nn.Module):
             return out
         else:
             out, (hn, cn) = self.gru(x)
-
             out = out.reshape(out.shape[0], -1)
             out = torch.cat([out, hn.reshape(hn.shape[1], -1)], dim=1)
             out = self.head1(self.linear(out))
@@ -919,14 +922,26 @@ class GRURegressor(nn.Module):
 
 class Training:
 
-    def __init__(self, config):
+    def __init__(self, config, X, cross_validation=True, y=None):
         self.scaler = StandardScaler()
         self.config = config
+        self.cross_validation = cross_validation
+        self.X = X
+        self.y = y
+        self.y_scale = self.scaler.fit_transform(self.y)
+        self.trained_models = self.cross_validate_models(
+            self.X,
+            self.y_scale,
+            self.config["epochs"],
+            self.config["clip_norm"],
+            self.cross_validation,
+        )
 
     def train_step(self, dataloader, model, opt, clip_norm):
         model.train()
         train_losses = []
         for x, target in dataloader:
+            # print("Trainstep:: ДО::", x.shape, target.shape)
             if torch.cuda.is_available():
                 model.cuda()
                 x = x.cuda()
@@ -957,16 +972,33 @@ class Training:
             val_losses.append(loss.item())
         return np.mean(val_losses), np.mean(val_mse), np.mean(val_mae)
 
+    def evaluate_steps(self, dataloader, model):
+        model.eval()
+        preds = []
+        targets = []
+        for x, target in dataloader:
+            if torch.cuda.is_available():
+                model.cuda()
+                x = x.cuda()
+                target = target.cuda()
+            pred = self.scaler.inverse_transform(model(x).detach().cpu().numpy())
+            rescale_y = self.scaler.inverse_transform(target.cpu().numpy())
+            preds.append(pred)
+            targets.append(rescale_y)
+        return np.concatenate(preds, axis=0), np.concatenate(targets, axis=0)
+
     def train_function(
         self, model, x_train, y_train, x_val, y_val, epochs=20, clip_norm=1.0
     ):
         from torch.utils.data import DataLoader
 
         if model.name in ["GRURegressor"]:
-            print("lr", 0.0003)
-            opt = torch.optim.Adam(model.parameters(), lr=0.0003)
+            print("lr", self.config["learning_rate_gru"])
+            opt = torch.optim.Adam(
+                model.parameters(), lr=self.config["learning_rate_gru"]
+            )
         else:
-            print("lr", 0.01)
+            print("lr", self.config["learning_rate"])
             opt = torch.optim.Adam(model.parameters(), lr=self.config["learning_rate"])
         if torch.cuda.is_available():
             model.cuda()
@@ -1005,44 +1037,109 @@ class Training:
                 best_weights = model.state_dict()
                 print("BEST ----> ")
             print(
-                f"{model.name} Epoch {e}, train_loss {round(loss,3)}, val_loss {round(val_loss, 3)}, val_mse {val_mse}"
+                f"{model.name} Epoch {e}, train_loss {round(loss,3)}, val_loss {round(val_loss, 3)}, val_mae {val_mae}"
             )
         model.load_state_dict(best_weights)
+        preds, targets = self.evaluate_steps(val_dataloader, model)
+        self.evaluation(model.name, preds, targets)
         return model, history
 
-    def plot_training_history(self, history):
+    def plot_training_history(self, model_name, history):
         plt.figure(figsize=(24, 8))
 
         plt.subplot(1, 2, 1)
         plt.plot(history["train_loss"], label="Training Loss", color="blue")
         plt.plot(history["val_loss"], label="Validation Loss", color="red")
-        plt.title("Loss")
+        plt.title(f"Loss for {model_name}")
         plt.xlabel("Epochs")
         plt.legend()
 
         plt.subplot(1, 2, 2)
-        plt.plot(history["val_mse"], label="Validation MSE", color="green")
-        plt.title("Metrics")
+        plt.plot(history["val_mae"], label="Validation MAE", color="green")
+        plt.title(f"Metrics for {model_name}")
         plt.xlabel("Epochs")
         plt.legend(loc="upper right")
 
         plt.tight_layout()
         plt.show()
 
-    def cross_validate_models(self, X, y, epochs=120, clip_norm=1.0):
-        y_scaler = self.scaler.fit_transform(y)
-        splits = 3
-        kf_cv = KFold(n_splits=splits, shuffle=True, random_state=42)
+    def evaluation(self, model_name, prediction, y_test):
+        mae = mean_absolute_error(y_test, prediction)
+        mse = mean_squared_error(y_test, prediction)
+
+        plt.figure(figsize=(15, 10))
+        plt.plot(prediction, "red", label="prediction", linewidth=1.0)
+        plt.plot(y_test, "green", label="actual", linewidth=1.0)
+        plt.legend()
+        plt.ylabel("oil_property_param_value")
+        plt.title(
+            "Model {}: MAE {}, MSE {}".format(
+                (model_name), round(mae, 2), round(mse, 2)
+            )
+        )
+        plt.show()
+
+        print("MAE score:", round(mae, 4))
+        print("MSE score:", round(mse, 4))
+
+    def cross_validate_models(
+        self, X, y, epochs=120, clip_norm=1.0, cross_validation=True
+    ):
+
         trained_models = []
-        for i, (train_idx, val_idx) in enumerate(kf_cv.split(X)):
-            print(f"\nSplit {i+1}/{splits}...")
-            x_train, x_val = X[train_idx], X[val_idx]
-            y_train, y_val = y_scaler[train_idx], y_scaler[val_idx]
-            for Model in [
-                # GRURegressor,
-                ConvRegressor,
-                LSTMRegressor,
-            ]:  # [GRURegressor, LSTMRegressor, ConvRegressor]
+
+        if cross_validation:
+            kf_cv = KFold(
+                n_splits=self.config["n_splits"], shuffle=True, random_state=42
+            )
+
+            for Model in [GRURegressor, ConvRegressor, LSTMRegressor]:
+                prev_train_len = None
+                prev_val_len = None
+
+                for i, (train_idx, val_idx) in enumerate(kf_cv.split(X)):
+                    print(f"\nSplit {i+1}/{self.config['n_splits']}...")
+                    train_len = len(train_idx)
+                    val_len = len(val_idx)
+
+                    if prev_train_len is not None and prev_train_len != train_len:
+                        print("Train lengths are not consistent. Skipping this split.")
+                        print(prev_train_len - train_len)
+                        continue
+
+                    if prev_val_len is not None and prev_val_len != val_len:
+                        print(
+                            "Validation lengths are not consistent. Skipping this split."
+                        )
+                        print(prev_val_len - val_len)
+                        continue
+
+                    prev_train_len = train_len
+                    prev_val_len = val_len
+
+                    x_train, x_val = X[train_idx], X[val_idx]
+                    y_train, y_val = y[train_idx], y[val_idx]
+                    model = Model(self.config)
+                    model, history = self.train_function(
+                        model,
+                        x_train,
+                        y_train,
+                        x_val,
+                        y_val,
+                        epochs=epochs,
+                        clip_norm=clip_norm,
+                    )
+                    self.plot_training_history(model.name, history)
+                    model.to("cpu")
+                    trained_models.append(model)
+                    torch.cuda.empty_cache()
+
+        else:
+            x_train, x_val, y_train, y_val = train_test_split(
+                X, y, test_size=0.2, random_state=42
+            )
+
+            for Model in [GRURegressor, ConvRegressor, LSTMRegressor]:
                 model = Model(self.config)
                 model, history = self.train_function(
                     model,
@@ -1053,10 +1150,11 @@ class Training:
                     epochs=epochs,
                     clip_norm=clip_norm,
                 )
-                self.plot_training_history(history)
+                self.plot_training_history(model.name, history)
                 model.to("cpu")
                 trained_models.append(model)
                 torch.cuda.empty_cache()
+
         return trained_models
 
     def inference_pytorch(self, model, dataloader):
@@ -1072,7 +1170,7 @@ class Training:
         torch.cuda.empty_cache()
         return np.concatenate(preds, axis=0)
 
-    def average_prediction(self, X_test, trained_models):
+    def average_prediction(self, X_test):
         from torch.utils.data import DataLoader
 
         all_preds = []
@@ -1082,13 +1180,13 @@ class Training:
             batch_size=self.config["batch_size_test"],
             shuffle=False,
         )
-        for i, model in enumerate(trained_models):
+        for i, model in enumerate(self.trained_models):
             current_pred = self.inference_pytorch(model, test_dataloader)
             all_preds.append(current_pred)
         return np.stack(all_preds, axis=1).mean(axis=1)
 
     def weighted_average_prediction(
-        self, X_test, trained_models, model_wise=[0.25, 0.35, 0.40], fold_wise=None
+        self, X_test, model_wise=[0.25, 0.35, 0.40], fold_wise=None
     ):
         all_preds = []
         test_dataloader = DataLoader(
@@ -1097,7 +1195,7 @@ class Training:
             batch_size=self.config["batch_size_test"],
             shuffle=False,
         )
-        for i, model in enumerate(trained_models):
+        for i, model in enumerate(self.trained_models):
             current_pred = self.inference_pytorch(model, test_dataloader)
             current_pred = model_wise[i % 3] * current_pred
             if fold_wise:
@@ -1109,10 +1207,10 @@ class Training:
 # -------------- ADD FUNCTIONS ------------------------------- #
 
 
-def load_config(file_path: str, model_name: str):
+def load_config(file_path: str, data: str, model_name: str):
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
-    return config[model_name]
+    return config[data][model_name]
 
 
 def seed_everything():
