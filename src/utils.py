@@ -1030,9 +1030,9 @@ class GRURegressor(nn.Module):
 
     def forward(self, x, y=None):
         shape1, shape2 = self.config["alter_shapes"]
-        # print("Forward:: ДО::", x.shape)
+        print("Forward:: ДО::", x.shape)
         x = x.reshape(x.shape[0], shape1, shape2)
-        # print("\nForward:: После::", x.shape)
+        print("\nForward:: После::", x.shape)
         if y is None:
             out, (hn, cn) = self.gru(x)
             out = out.reshape(out.shape[0], -1)
@@ -1315,6 +1315,7 @@ class Training:
         return np.stack(all_preds, axis=1).mean(axis=1)
 
     def weighted_average_prediction(self, model_wise=[0.5, 0.25, 0.25], fold_wise=None):
+        from torch.utils.data import DataLoader
         all_preds = []
         test_dataloader = DataLoader(
             Dataset(torch.FloatTensor(self.test_X)),

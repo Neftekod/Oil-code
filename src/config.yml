@@ -34,7 +34,7 @@ embeddings:
     Lstm:
       input_layer: 28
 
-mol2vec:
+embeddings_descriptors:
   SmallNN:
     n_splits: 5
     neurons: 64
@@ -50,15 +50,22 @@ mol2vec:
   torchRegressor:
     input: 690
     neurons: 128
-    alter_shapes: [15, 46]
+    alter_shapes: [1, 1481]
     lenear_input: 2176
     batch_size_train: 2
     batch_size_test: 2
     learning_rate: 0.001
+    learning_rate_gru: 0.005
     n_splits: 5
-    epochs: 120
+    epochs: 2
     clip_norm: 1.0
     verbose: 1
+    Conv:
+      input_layer: 88
+    Gru: 
+      input_layer: 4
+    Lstm:
+      input_layer: 6
 
 similarity_vectors:
   SmallNN:
