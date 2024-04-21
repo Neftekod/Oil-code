@@ -2,6 +2,7 @@
 embeddings:
   SmallNN:
     input: [338, 384]
+    input_test: [138, 384]
     n_splits: 5
     neurons: 64
     activation: relu

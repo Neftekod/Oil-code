@@ -29,9 +29,7 @@ from gensim.models import word2vec
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.metrics import mean_squared_error, mean_absolute_error
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.svm import SVR
-from sklearn.linear_model import RidgeCV, LassoCV
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dropout, Dense
@@ -424,6 +422,8 @@ class SimpleRegressions:
             raise ValueError("Length of X and y must be the same")
 
         self.test_X = test_X
+        self.X = X
+        self.y = y
         self.catboost = None
         self.lgbm = None
         self.gb_regressor = None
@@ -505,9 +505,46 @@ class SimpleRegressions:
                 "GradientBoosting_Prediction": gb_prediction_train,
             }
         )
-        self.ridge_regressor = RidgeCV(alphas=[1.0])
-        self.ridge_regressor.fit(predictions_df_train, self.y_train)
-        self.evaluation(self.ridge_regressor)
+        catboost_prediction_test = self.catboost.predict(self.X_test)
+        lgbm_prediction_test = self.lgbm.predict(self.X_test)
+        gb_prediction_test = self.gb_regressor.predict(self.X_test)
+        predictions_df_test = pd.DataFrame(
+            {
+                "CatBoost_Prediction": catboost_prediction_test,
+                "LGBM_Prediction": lgbm_prediction_test,
+                "GradientBoosting_Prediction": gb_prediction_test,
+            }
+        )
+        self.ridge_regressor = RandomForestRegressor(
+            n_estimators=1000, criterion="absolute_error", verbose=1
+        )
+        self.ridge_regressor.fit(predictions_df_train, self.y_train_scaled)
+        prediction = self.ridge_regressor.predict(predictions_df_test)
+        prediction = self.s_caler.inverse_transform(prediction.reshape(-1, 1)).flatten()
+        mae = mean_absolute_error(
+            self.s_caler.inverse_transform(self.y_test_scaled.reshape(-1, 1)).flatten(),
+            prediction,
+        )
+        mse = mean_squared_error(
+            self.s_caler.inverse_transform(self.y_test_scaled.reshape(-1, 1)).flatten(),
+            prediction,
+        )
+
+        plt.figure(figsize=(15, 10))
+        plt.plot(prediction, "red", label="prediction", linewidth=1.0)
+        plt.plot(
+            self.s_caler.inverse_transform(self.y_test_scaled.reshape(-1, 1)).flatten(),
+            "green",
+            label="actual",
+            linewidth=1.0,
+        )
+        plt.legend()
+        plt.ylabel("oil_property_param_value")
+        plt.title("MAE {}, MSE {}".format(round(mae, 4), round(mse, 4)))
+        plt.show()
+
+        print("MAE score:", round(mae, 4))
+        print("MSE score:", round(mse, 4))
         return self.ridge_regressor
 
     def ridge_test(self):
@@ -536,7 +573,7 @@ class SmallNN:
 
     def __init__(self, X: np.ndarray, y: np.ndarray, config):
         self.config = config
-
+        self.model = None
         if X is None or y is None:
             raise ValueError("X and y cannot be None")
 
@@ -623,8 +660,18 @@ class SmallNN:
         print("MSE score:", round(mse, 4))
 
     def fit_and_evaluate(self):
-        model, score = self.neural_model()
-        self.evaluation(model)
+        self.model, score = self.neural_model()
+        self.evaluation(self.model)
+
+    def predict(self, X):
+        if self.model is None:
+            raise ValueError("The model has not been trained yet.")
+
+        y_pred_scaled = self.model.predict(X)
+        y_pred_original = self.s_caler.inverse_transform(
+            y_pred_scaled.reshape(-1, 1)
+        ).flatten()
+        return y_pred_original
 
 
 class LstmRegressor:
