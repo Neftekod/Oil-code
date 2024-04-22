@@ -200,7 +200,7 @@ embeddings_sim:
     learning_rate: 0.02
     learning_rate_gru: 0.005
     n_splits: 5
-    epochs: 250
+    epochs: 180
     clip_norm: 1.0
     verbose: 1
     Conv:
