@@ -96,7 +96,8 @@ class PreprocessSMILES:
             )
         )
         rows_to_drop = df[df['mol'].isnull()].index
-        df = df.drop(df[df['blend_id'].isin(df.loc[rows_to_drop, 'blend_id'])].index)
+        df = df.drop(df[df['blend_id'].isin(
+            df.loc[rows_to_drop, 'blend_id'])].index)
         df["descriptors_array"] = (
             pd.merge(df, descriptors, on="smiles", how="inner")  # ! change
             .iloc[:, 6:]
@@ -121,7 +122,8 @@ class PreprocessSMILES:
         similarity_vectors = []
         for i in range(len(smiles_list)):
             for j in range(i + 1, len(smiles_list)):
-                similarity_score = DataStructs.TanimotoSimilarity(fps[i], fps[j])
+                similarity_score = DataStructs.TanimotoSimilarity(
+                    fps[i], fps[j])
                 similarity_vectors.append(similarity_score)
         return np.array(similarity_vectors)
 
@@ -157,7 +159,8 @@ class PreprocessSMILES:
         pd.DataFrame
             Preprocessed data with mol2vec embeddings, where each row is a sample and contains the mol2vec embeddings in a column named 'mol2vec'.
         """
-        model = word2vec.Word2Vec.load(self.directory + "/embed_model/model_300dim.pkl")
+        model = word2vec.Word2Vec.load(
+            self.directory + "/embed_model/model_300dim.pkl")
         df["sentence"] = df.apply(
             lambda x: MolSentence(mol2alt_sentence(x["mol"], 1)), axis=1
         )
@@ -167,8 +170,10 @@ class PreprocessSMILES:
             .reset_index()
         )
         grouped_df["mol2vec"] = [
-            DfVec(x) for x in sentences2vec(grouped_df["sentence"], model, unseen="UNK")
-        ]
+            DfVec(x) for x in sentences2vec(
+                grouped_df["sentence"],
+                model,
+                unseen="UNK")]
         grouped_df["mol2vec"] = grouped_df["mol2vec"].apply(lambda x: x.vec)
         return grouped_df
 
@@ -195,7 +200,8 @@ class PreprocessSMILES:
             graph.add_edges(bond.GetBeginAtomIdx(), bond.GetEndAtomIdx())
             graph.add_edges(bond.GetEndAtomIdx(), bond.GetBeginAtomIdx())
 
-        node_feats = torch.tensor([[atom.GetAtomicNum()] for atom in mol.GetAtoms()], dtype=torch.float32)
+        node_feats = torch.tensor([[atom.GetAtomicNum()]
+                                  for atom in mol.GetAtoms()], dtype=torch.float32)
         graph.ndata['feat'] = node_feats
 
         edge_feats = []
@@ -256,23 +262,23 @@ class PreprocessSMILES:
         model_path = "embed_model/" + model
 
         if not os.path.isdir(model_path):
-            _ = snapshot_download(repo_id=model, cache_dir=self.directory + model_path)
+            _ = snapshot_download(
+                repo_id=model,
+                cache_dir=self.directory +
+                model_path)
 
         if model == "ibm/MoLFormer-XL-both-10pct":
             model_path = (
-                self.directory
-                + model_path
-                + "/models--ibm--MoLFormer-XL-both-10pct/snapshots/7b12d946c181a37f6012b9dc3b002275de070314"
-            )
-            model = AutoModelForMaskedLM.from_pretrained(
-                model_path
-            )  # ? Why Error Tokenizer class MolformerTokenizer does not exist or is not currently imported.
+                self.directory +
+                model_path +
+                "/models--ibm--MoLFormer-XL-both-10pct/snapshots/7b12d946c181a37f6012b9dc3b002275de070314")
+            # ? Why Error Tokenizer class MolformerTokenizer does not exist or is not currently imported.
+            model = AutoModelForMaskedLM.from_pretrained(model_path)
         else:
             model_path = (
-                self.directory
-                + model_path
-                + "/models--DeepChem--ChemBERTa-10M-MTR/snapshots/b65d0a6af3156071d9519e867d695aa265bb393f"
-            )
+                self.directory +
+                model_path +
+                "/models--DeepChem--ChemBERTa-10M-MTR/snapshots/b65d0a6af3156071d9519e867d695aa265bb393f")
             model = AutoModel.from_pretrained(model_path)
             model.eval()
 
@@ -281,7 +287,10 @@ class PreprocessSMILES:
         df["embeddings"] = df.apply(process_row, axis=1)
         return df
 
-    def smiles2sentence(self, df: pd.DataFrame, task: str = "test") -> pd.DataFrame:
+    def smiles2sentence(
+            self,
+            df: pd.DataFrame,
+            task: str = "test") -> pd.DataFrame:
         """
         Aggregate SMILES data by blend_id and oil_property_param_title to form sentences.
 
@@ -354,8 +363,10 @@ class PreprocessSMILES:
         Tuple[np.ndarray, np.ndarray]
             A tuple of X (an object numpy array of shape (n_samples, n_columns)) and y (a float64 numpy array of shape (n_samples,)).
         """
-        target = df.groupby('blend_id')['oil_property_param_value'].mean().dropna()
-        blend_id_without_nulls = df.groupby('blend_id')['oil_property_param_value'].mean().dropna().index.tolist()
+        target = df.groupby('blend_id')[
+            'oil_property_param_value'].mean().dropna()
+        blend_id_without_nulls = df.groupby(
+            'blend_id')['oil_property_param_value'].mean().dropna().index.tolist()
         df = df[df["blend_id"].isin(blend_id_without_nulls)][column]
         X = np.vstack(np.array(df, dtype=object))
         y = target.values.astype(np.float64)
@@ -369,17 +380,23 @@ class GetDescriptors:
 
     def make_unique_smiles_df(self):
         unique_smiles = self.dataframe['smiles'].dropna().unique()
-        smiles_df = pd.DataFrame({'id': range(len(unique_smiles)), 'smiles': unique_smiles})
+        smiles_df = pd.DataFrame(
+            {'id': range(len(unique_smiles)), 'smiles': unique_smiles})
         smiles_df = smiles_df.dropna(subset=['smiles'])
-        smiles_df['mol'] = smiles_df['smiles'].apply(lambda x: Chem.MolFromSmiles(x))
+        smiles_df['mol'] = smiles_df['smiles'].apply(
+            lambda x: Chem.MolFromSmiles(x))
         return smiles_df
 
     def number_of_atoms(self, atom_list):
         for i in atom_list:
-            self.smiles_df['num_of_{}_atoms'.format(i)] = self.smiles_df['mol'].apply(lambda x: len(x.GetSubstructMatches(Chem.MolFromSmiles(i))))
-        self.smiles_df['hs_mol'] = self.smiles_df['mol'].apply(lambda x: Chem.AddHs(x))
-        self.smiles_df['num_of_atoms'] = self.smiles_df['hs_mol'].apply(lambda x: x.GetNumAtoms())
-        self.smiles_df['num_of_heavy_atoms'] = self.smiles_df['hs_mol'].apply(lambda x: x.GetNumHeavyAtoms())
+            self.smiles_df['num_of_{}_atoms'.format(i)] = self.smiles_df['mol'].apply(
+                lambda x: len(x.GetSubstructMatches(Chem.MolFromSmiles(i))))
+        self.smiles_df['hs_mol'] = self.smiles_df['mol'].apply(
+            lambda x: Chem.AddHs(x))
+        self.smiles_df['num_of_atoms'] = self.smiles_df['hs_mol'].apply(
+            lambda x: x.GetNumAtoms())
+        self.smiles_df['num_of_heavy_atoms'] = self.smiles_df['hs_mol'].apply(
+            lambda x: x.GetNumHeavyAtoms())
 
     def calculate_descriptors(self):
         calc = Calculator(descriptors, ignore_3D=True)
@@ -430,8 +447,7 @@ class SimpleRegressions:
         self.ridge_regressor = None
 
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
-            X, y, test_size=0.2, shuffle=True, random_state=42
-        )
+            X, y, test_size=0.2, shuffle=True, random_state=42)
         self.s_caler = StandardScaler()
         self.y_train_scaled = self.s_caler.fit_transform(
             self.y_train.reshape(-1, 1)
@@ -445,7 +461,8 @@ class SimpleRegressions:
             raise ValueError("Model cannot be None")
 
         prediction = model.predict(self.X_test)
-        prediction = self.s_caler.inverse_transform(prediction.reshape(-1, 1)).flatten()
+        prediction = self.s_caler.inverse_transform(
+            prediction.reshape(-1, 1)).flatten()
         mae = mean_absolute_error(self.y_test, prediction)
         mse = mean_squared_error(self.y_test, prediction)
 
@@ -463,8 +480,10 @@ class SimpleRegressions:
     def fit_and_evaluate(self):
         print("Catboost")
         self.catboost = CatBoostRegressor(
-            iterations=2000, learning_rate=0.1, loss_function="RMSE", random_seed=1
-        )
+            iterations=2000,
+            learning_rate=0.1,
+            loss_function="RMSE",
+            random_seed=1)
         self.catboost.fit(
             self.X_train,
             self.y_train_scaled,
@@ -518,15 +537,12 @@ class SimpleRegressions:
         self.ridge_regressor = GradientBoostingRegressor(n_estimators=1000)
         self.ridge_regressor.fit(predictions_df_train, self.y_train_scaled)
         prediction = self.ridge_regressor.predict(predictions_df_test)
-        prediction = self.s_caler.inverse_transform(prediction.reshape(-1, 1)).flatten()
-        mae = mean_absolute_error(
-            self.s_caler.inverse_transform(self.y_test_scaled.reshape(-1, 1)).flatten(),
-            prediction,
-        )
-        mse = mean_squared_error(
-            self.s_caler.inverse_transform(self.y_test_scaled.reshape(-1, 1)).flatten(),
-            prediction,
-        )
+        prediction = self.s_caler.inverse_transform(
+            prediction.reshape(-1, 1)).flatten()
+        mae = mean_absolute_error(self.s_caler.inverse_transform(
+            self.y_test_scaled.reshape(-1, 1)).flatten(), prediction, )
+        mse = mean_squared_error(self.s_caler.inverse_transform(
+            self.y_test_scaled.reshape(-1, 1)).flatten(), prediction, )
 
         plt.figure(figsize=(15, 10))
         plt.plot(prediction, "red", label="prediction", linewidth=1.0)
@@ -546,7 +562,8 @@ class SimpleRegressions:
         return self.ridge_regressor
 
     def ridge_test(self):
-        catboost_prediction_test = self.catboost.predict(self.test_X, thread_count=1)
+        catboost_prediction_test = self.catboost.predict(
+            self.test_X, thread_count=1)
         lgbm_prediction_test = self.lgbm.predict(self.test_X, num_threads=1)
         gb_prediction_test = self.gb_regressor.predict(self.test_X)
         predictions_df_test = pd.DataFrame(
@@ -576,8 +593,7 @@ class SmallNN:
             raise ValueError("X and y cannot be None")
 
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
-            X, y, test_size=0.1, shuffle=True, random_state=42
-        )
+            X, y, test_size=0.1, shuffle=True, random_state=42)
         self.s_caler = MinMaxScaler()
         self.y_train_scaled = self.s_caler.fit_transform(
             self.y_train.reshape(-1, 1)
@@ -604,13 +620,17 @@ class SmallNN:
                 activation=self.config["activation"],
             )
         )
-        model.add(Dense(self.config["neurons"], activation=self.config["activation"]))
+        model.add(
+            Dense(
+                self.config["neurons"],
+                activation=self.config["activation"]))
         model.add(Dense(1, activation=self.config["output_activation"]))
 
         opt = keras.optimizers.Adam(learning_rate=self.config["learning_rate"])
         model.compile(
-            loss="mean_squared_error", optimizer=opt, metrics=["mean_absolute_error"]
-        )
+            loss="mean_squared_error",
+            optimizer=opt,
+            metrics=["mean_absolute_error"])
 
         rlrop = ReduceLROnPlateau(
             monitor="val_loss",
@@ -618,7 +638,8 @@ class SmallNN:
             patience=self.config["lr_patience"],
         )
 
-        for train, validation in kfold.split(self.X_train, self.y_train_scaled):
+        for train, validation in kfold.split(
+                self.X_train, self.y_train_scaled):
 
             model.fit(
                 self.X_train[train],
@@ -642,7 +663,8 @@ class SmallNN:
             raise ValueError("Model cannot be None")
 
         prediction = model.predict(self.X_test)
-        prediction = self.s_caler.inverse_transform(prediction.reshape(-1, 1)).flatten()
+        prediction = self.s_caler.inverse_transform(
+            prediction.reshape(-1, 1)).flatten()
         mae = mean_absolute_error(self.y_test, prediction)
         mse = mean_squared_error(self.y_test, prediction)
 
@@ -701,8 +723,10 @@ class LstmRegressor:
     def create_model(self, input_shape):
         model = Sequential()
         model.add(
-            LSTM(units=self.neurons_1, return_sequences=True, input_shape=input_shape)
-        )
+            LSTM(
+                units=self.neurons_1,
+                return_sequences=True,
+                input_shape=input_shape))
         model.add(Dropout(self.dropout_rate))
         model.add(LSTM(units=self.neurons_2, return_sequences=True))
         model.add(Dropout(self.dropout_rate))
@@ -717,8 +741,10 @@ class LstmRegressor:
     def fit(self, X_train, y_train, X_test, y_test):
         input_shape = (X_train.shape[1], 1)
         if self.scaler:
-            y_train_scaled = self.scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
-            y_test_scaled = self.scaler.transform(y_test.reshape(-1, 1)).flatten()
+            y_train_scaled = self.scaler.fit_transform(
+                y_train.reshape(-1, 1)).flatten()
+            y_test_scaled = self.scaler.transform(
+                y_test.reshape(-1, 1)).flatten()
         else:
             y_train_scaled = y_train
             y_test_scaled = y_test
@@ -731,8 +757,9 @@ class LstmRegressor:
             verbose=1,
         )
         checkpoint = self.create_model_checkpoint(
-            filepath="best_model_weights.h5", monitor="val_loss", save_best_only=True
-        )
+            filepath="best_model_weights.h5",
+            monitor="val_loss",
+            save_best_only=True)
         history = self.model.fit(
             X_train,
             y_train_scaled,
@@ -762,10 +789,10 @@ class LstmRegressor:
         plt.figure(figsize=(12, 6))
 
         plt.subplot(1, 2, 1)
-        plt.plot(history.history[self.loss_], label="Training Loss", color="blue")
-        plt.plot(
-            history.history["val_" + self.loss_], label="Validation Loss", color="red"
-        )
+        plt.plot(history.history[self.loss_],
+                 label="Training Loss", color="blue")
+        plt.plot(history.history["val_" + self.loss_],
+                 label="Validation Loss", color="red")
         plt.title("Loss")
         plt.xlabel("Epochs")
         plt.legend()
@@ -833,9 +860,8 @@ class DataLoader:
         self.data_x = self.combine_features()
         self.task = task
         if self.task == "train":
-            self.data_y = np.array(main_array["oil_property_param_value"]).reshape(
-                -1, 1
-            )
+            self.data_y = np.array(
+                main_array["oil_property_param_value"]).reshape(-1, 1)
         else:
             self.data_y = None
 
@@ -1092,7 +1118,8 @@ class Training:
                 x = x.cuda()
                 target = target.cuda()
             loss = model(x, target)
-            pred = self.scaler.inverse_transform(model(x).detach().cpu().numpy())
+            pred = self.scaler.inverse_transform(
+                model(x).detach().cpu().numpy())
             rescale_y = self.scaler.inverse_transform(target.cpu().numpy())
             val_mse.append(mean_squared_error(pred, rescale_y))
             val_mae.append(mean_absolute_error(pred, rescale_y))
@@ -1108,7 +1135,8 @@ class Training:
                 model.cuda()
                 x = x.cuda()
                 target = target.cuda()
-            pred = self.scaler.inverse_transform(model(x).detach().cpu().numpy())
+            pred = self.scaler.inverse_transform(
+                model(x).detach().cpu().numpy())
             rescale_y = self.scaler.inverse_transform(target.cpu().numpy())
             preds.append(pred)
             targets.append(rescale_y)
@@ -1126,7 +1154,9 @@ class Training:
             )
         else:
             print("lr", self.config["learning_rate"])
-            opt = torch.optim.Adam(model.parameters(), lr=self.config["learning_rate"])
+            opt = torch.optim.Adam(
+                model.parameters(),
+                lr=self.config["learning_rate"])
         if torch.cuda.is_available():
             model.cuda()
 
@@ -1149,11 +1179,16 @@ class Training:
         best_loss = np.inf
         best_weights = None
 
-        history = {"train_loss": [], "val_loss": [], "val_mse": [], "val_mae": []}
+        history = {
+            "train_loss": [],
+            "val_loss": [],
+            "val_mse": [],
+            "val_mae": []}
 
         for e in range(epochs):
             loss = self.train_step(train_dataloader, model, opt, clip_norm)
-            val_loss, val_mse, val_mae = self.validation_step(val_dataloader, model)
+            val_loss, val_mse, val_mae = self.validation_step(
+                val_dataloader, model)
             history["train_loss"].append(loss)
             history["val_loss"].append(val_loss)
             history["val_mse"].append(val_mse)
@@ -1230,7 +1265,8 @@ class Training:
                     val_len = len(val_idx)
 
                     if prev_train_len is not None and prev_train_len != train_len:
-                        print("Train lengths are not consistent. Skipping this split.")
+                        print(
+                            "Train lengths are not consistent. Skipping this split.")
                         print(prev_train_len - train_len)
                         continue
 
@@ -1291,7 +1327,8 @@ class Training:
             if torch.cuda.is_available():
                 model.cuda()
                 x = x.cuda()
-            pred = self.scaler.inverse_transform(model(x).detach().cpu().numpy())
+            pred = self.scaler.inverse_transform(
+                model(x).detach().cpu().numpy())
             preds.append(pred)
         model.to("cpu")
         torch.cuda.empty_cache()
@@ -1312,7 +1349,13 @@ class Training:
             all_preds.append(current_pred)
         return np.stack(all_preds, axis=1).mean(axis=1)
 
-    def weighted_average_prediction(self, model_wise=[0.5, 0.25, 0.25], fold_wise=None):
+    def weighted_average_prediction(
+            self,
+            model_wise=[
+                0.5,
+                0.25,
+                0.25],
+            fold_wise=None):
         from torch.utils.data import DataLoader
         all_preds = []
         test_dataloader = DataLoader(
